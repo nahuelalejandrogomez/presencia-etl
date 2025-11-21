@@ -127,7 +127,8 @@ def infer_column_type(col_name):
                            'OBSCOB', 'OBISOCIO', 'NOMCOB', 'DOMCOB', 'LOCCOB', 'TELCOB', 'CELCOB',
                            'IVACOB', 'CUICOB', 'NOMSOCIO', 'FANSOCIO', 'DOMSOCIO', 'LOCSOCIO',
                            'PROSOCIO', 'TELSOCIO', 'IVASOCIO', 'CUISOCIO', 'COMSOCIO', 'DESZONA',
-                           'ESTLIQUIDA', 'PERLIQUIDA', 'OBSLIQUIDA', 'PAGLIQUIDA', 'COMLIQUIDA']) or
+                           'ESTLIQUIDA', 'PERLIQUIDA', 'OBSLIQUIDA', 'PAGLIQUIDA', 'COMLIQUIDA',
+                           'DCOSOCIO', 'HCOSOCIO']) or
           # Campos específicos que sabemos que son INT:
           col_upper in ['BAJA', 'POSCOB', 'PROCOB', 'ULTCOB', 'ZONCOB', 'COBSOCIO',
                        'PLASOCIO', 'ZONSOCIO', 'POSSOCIO', 'SUBSOCIO', 'ZONLIQUIDA', 'COBLIQUIDA']):
