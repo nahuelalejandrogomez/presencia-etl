@@ -62,6 +62,6 @@ def run_clean():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
 
-    # Import acá adentro: evita error si waitress no está en local
+    # Import adentro para evitar fallo en local si waitress no está instalada
     from waitress import serve
     serve(app, host="0.0.0.0", port=port)
