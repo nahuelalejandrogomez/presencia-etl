@@ -252,6 +252,7 @@ def sync_table(table_name, conn, cursor):
             cursor.executemany(insert_sql, values)
             inserted += len(batch)
         except Exception as e:
+            print(f"   ⚠️ Error en batch: {e}")
             # Intentar uno por uno si falla el batch
             for row in batch:
                 try:
@@ -260,14 +261,15 @@ def sync_table(table_name, conn, cursor):
                     for col in all_cols:
                         val = row.get(col) if row.get(col) else None
                         col_upper = col.upper()
-                        if val and ('FEC' in col_upper or 'FECHA' in col_upper or 'DATE' in col_upper or 
+                        if val and ('FEC' in col_upper or 'FECHA' in col_upper or 'DATE' in col_upper or
                                    col_upper in ['PERLIQUIDANRO', 'F1CSOCIO', 'FBUSCAHR', 'ALTCOB', 'ALTSOCIO', 'BAJAFECHA']):
                             val = convert_date_value(val)
                         row_values.append(val)
                     cursor.execute(insert_sql, tuple(row_values) + (row_hash,))
                     inserted += 1
-                except:
-                    pass
+                except Exception as row_err:
+                    if inserted == 0:  # Solo mostrar el primer error
+                        print(f"   ⚠️ Error en registro: {row_err}")
     
     cursor.execute("SET FOREIGN_KEY_CHECKS=1")
     cursor.execute("SET UNIQUE_CHECKS=1")
