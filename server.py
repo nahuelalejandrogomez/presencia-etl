@@ -3,12 +3,16 @@ import subprocess
 from flask import Flask, jsonify
 from dotenv import load_dotenv
 
+# Cargar variables de entorno
 load_dotenv()
+
 app = Flask(__name__)
+
 
 @app.route("/")
 def index():
     return jsonify({"service": "ETL Presencia", "status": "online"})
+
 
 @app.route("/run/sync_all")
 def run_sync_all():
@@ -23,6 +27,7 @@ def run_sync_all():
     except subprocess.CalledProcessError as e:
         return jsonify({"status": "error", "error": e.stderr}), 500
 
+
 @app.route("/run/sync_incremental")
 def run_sync_incremental():
     try:
@@ -35,6 +40,7 @@ def run_sync_incremental():
         return jsonify({"status": "ok", "output": result.stdout})
     except subprocess.CalledProcessError as e:
         return jsonify({"status": "error", "error": e.stderr}), 500
+
 
 @app.route("/run/clean")
 def run_clean():
@@ -50,13 +56,12 @@ def run_clean():
         return jsonify({"status": "error", "error": e.stderr}), 500
 
 
-# ----------------------------
-#   PRODUCCIÓN PARA RAILWAY
-# ----------------------------
+# ----------------------------------------
+#     PRODUCCIÓN: SERVIDOR PARA RAILWAY
+# ----------------------------------------
 if __name__ == "__main__":
-    # Usa el puerto dinámico que da Railway
     port = int(os.environ.get("PORT", 8000))
 
-    # Usamos "waitress" como servidor de producción
+    # Import acá adentro: evita error si waitress no está en local
     from waitress import serve
     serve(app, host="0.0.0.0", port=port)
