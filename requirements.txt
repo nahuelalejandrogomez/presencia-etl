@@ -1,4 +1,9 @@
-# Dependencias mínimas para correr el servidor Flask en Railway
+# Dependencias mínimas para correr el servidor de ETL en Railway
+
 Flask==3.0.3
+waitress==2.1.2
 python-dotenv==1.0.0
 mysql-connector-python==8.2.0
+validators==0.22.0
+cryptography==41.0.7
+typing-extensions==4.8.0
