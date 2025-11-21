@@ -29,12 +29,12 @@ TABLES = [
     'TbComentariosSocios'
 ]
 
-# 🔥 FILTROS CRÍTICOS: Solo se sincronizan registros activos con cupones
+# 🔥 FILTROS: Solo se excluyen socios dados de baja
 # Se aplican en read_access_table() después de mdb-export
 TABLE_FILTERS = {
     'Socios': {
-        'BAJA': '1',      # Excluir socios dados de baja (BAJA=1)
-        'COMSOCIO': 'CU'  # Solo socios con cupones (COMSOCIO='CU')
+        'BAJA': '1'      # Excluir socios dados de baja (BAJA=1)
+        # 'COMSOCIO': 'CU'  # Deshabilitado - cargamos todos los socios activos
     }
 }
 
