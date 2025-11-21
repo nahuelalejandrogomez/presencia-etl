@@ -12,37 +12,13 @@ app = Flask(__name__)
 def index():
     return jsonify({"service": "ETL Presencia", "status": "online"})
 
-@app.route("/run/sync_all")
-def run_sync_all():
+# ----------------------------
+# Función utilitaria
+# ----------------------------
+def run_script(script_name):
     try:
         result = subprocess.run(
-            ["python3", "sync_ALL.py"],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        return jsonify({"status": "ok", "output": result.stdout})
-    except subprocess.CalledProcessError as e:
-        return jsonify({"status": "error", "error": e.stderr}), 500
-
-@app.route("/run/sync_incremental")
-def run_sync_incremental():
-    try:
-        result = subprocess.run(
-            ["python3", "sync_INCREMENTAL.py"],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        return jsonify({"status": "ok", "output": result.stdout})
-    except subprocess.CalledProcessError as e:
-        return jsonify({"status": "error", "error": e.stderr}), 500
-
-@app.route("/run/clean")
-def run_clean():
-    try:
-        result = subprocess.run(
-            ["python3", "clean_all_tables.py"],
+            ["python3", script_name],
             capture_output=True,
             text=True,
             check=True
@@ -52,7 +28,22 @@ def run_clean():
         return jsonify({"status": "error", "error": e.stderr}), 500
 
 # ----------------------------
-#   PRODUCCIÓN EN RAILWAY
+# Endpoints
+# ----------------------------
+@app.route("/run/sync_all")
+def sync_all():
+    return run_script("sync_ALL.py")
+
+@app.route("/run/sync_incremental")
+def sync_incremental():
+    return run_script("sync_INCREMENTAL.py")
+
+@app.route("/run/clean")
+def clean_tables():
+    return run_script("clean_all_tables.py")
+
+# ----------------------------
+# Producción en Railway
 # ----------------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
