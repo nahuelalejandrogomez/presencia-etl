@@ -1,0 +1,23 @@
+# Dependencias del proyecto de migración Access -> MySQL
+# Instalación: pip install -r requirements.txt
+
+# Conexión a bases de datos
+pyodbc==5.0.1                 # Driver ODBC para conectar a Microsoft Access
+mysql-connector-python==8.2.0 # Driver oficial de MySQL
+
+# Seguridad y validación
+cryptography==41.0.7          # Funciones criptográficas seguras
+validators==0.22.0            # Validación de inputs adicional
+
+# Manejo de variables de entorno (opcional pero recomendado)
+python-dotenv==1.0.0          # Para cargar variables desde archivo .env
+
+# Utilidades adicionales
+typing-extensions==4.8.0      # Mejores anotaciones de tipos (para compatibilidad)
+pathlib==1.0.1               # Manejo seguro de rutas de archivos
+
+# Dependencias de desarrollo (opcionales)
+# Descomenta si necesitas herramientas de desarrollo
+# pytest==7.4.3              # Framework de testing
+# black==23.11.0              # Formateador de código
+# flake8==6.1.0               # Linter de código
