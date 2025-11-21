@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sincronización COMPLETA de todas las tablas"""
+"""Sincronización COMPLETA de todas las tablas - Usando esquema real de Access"""
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -7,6 +7,7 @@ load_dotenv()
 import os
 import subprocess
 import csv
+import re
 from io import StringIO
 import mysql.connector
 from collections import OrderedDict
@@ -30,11 +31,9 @@ TABLES = [
 ]
 
 # 🔥 FILTROS: Solo se excluyen socios dados de baja
-# Se aplican en read_access_table() después de mdb-export
 TABLE_FILTERS = {
     'Socios': {
         'BAJA': '1'      # Excluir socios dados de baja (BAJA=1)
-        # 'COMSOCIO': 'CU'  # Deshabilitado - cargamos todos los socios activos
     }
 }
 
@@ -50,6 +49,75 @@ def get_mysql_connection():
     }
     return mysql.connector.connect(**config)
 
+def get_access_schema(table_name):
+    """Obtener esquema real de tabla desde Access usando mdb-schema"""
+    result = subprocess.run(
+        ['mdb-schema', ACCESS_DB, 'mysql'],
+        capture_output=True,
+        text=True,
+        check=True
+    )
+
+    # Buscar la definición de la tabla específica
+    schema_text = result.stdout
+
+    # Regex para encontrar CREATE TABLE específico
+    pattern = rf'CREATE TABLE `{table_name}`\s*\(\s*(.*?)\);'
+    match = re.search(pattern, schema_text, re.DOTALL | re.IGNORECASE)
+
+    if not match:
+        return None
+
+    columns_text = match.group(1)
+    columns = {}
+
+    # Parsear cada línea de columna
+    for line in columns_text.split('\n'):
+        line = line.strip().rstrip(',')
+        if not line or line.startswith('--'):
+            continue
+
+        # Extraer nombre y tipo: `COLUMNA` tipo
+        col_match = re.match(r'`(\w+)`\s+(.+)', line)
+        if col_match:
+            col_name = col_match.group(1)
+            col_type_raw = col_match.group(2).strip()
+
+            # Convertir tipos de Access/mdb-schema a MySQL compatibles
+            col_type = convert_access_type_to_mysql(col_type_raw)
+            columns[col_name] = col_type
+
+    return columns
+
+def convert_access_type_to_mysql(access_type):
+    """Convertir tipo de mdb-schema a tipo MySQL válido"""
+    access_type_lower = access_type.lower()
+
+    # Remover NOT NULL por ahora, lo agregamos después si es necesario
+    is_not_null = 'not null' in access_type_lower
+    access_type_clean = access_type_lower.replace('not null', '').strip()
+
+    # Mapeo de tipos
+    if 'auto_increment' in access_type_clean:
+        return 'INT'  # Ignoramos auto_increment porque usamos nuestro ID
+    elif access_type_clean.startswith('varchar'):
+        # Extraer tamaño
+        match = re.search(r'varchar\s*\((\d+)\)', access_type_clean)
+        size = match.group(1) if match else '255'
+        return f'VARCHAR({size})'
+    elif access_type_clean == 'text':
+        return 'TEXT'
+    elif access_type_clean in ['smallint', 'int', 'integer']:
+        return 'INT'
+    elif access_type_clean in ['double', 'float']:
+        return 'DOUBLE'
+    elif access_type_clean == 'boolean':
+        return 'TINYINT(1)'
+    elif access_type_clean in ['date', 'datetime']:
+        return 'DATETIME'
+    else:
+        return 'VARCHAR(255)'  # Default
+
 def read_access_table(table_name):
     """Leer tabla desde Access aplicando filtros si existen"""
     result = subprocess.run(
@@ -60,22 +128,22 @@ def read_access_table(table_name):
     )
     reader = csv.DictReader(StringIO(result.stdout))
     rows = list(reader)
-    
+
     # Aplicar filtros en Python si existen para esta tabla
     if table_name in TABLE_FILTERS:
         filters = TABLE_FILTERS[table_name]
-        
+
         if table_name == 'Socios' and isinstance(filters, dict):
             # Filtro 1: BAJA<>1 (excluir dados de baja)
             if 'BAJA' in filters:
                 exclude_value = filters['BAJA']
                 rows = [row for row in rows if row.get('BAJA') != exclude_value]
-            
+
             # Filtro 2: COMSOCIO='CU' (solo socios con cupones)
             if 'COMSOCIO' in filters:
                 required_value = filters['COMSOCIO']
                 rows = [row for row in rows if row.get('COMSOCIO') == required_value]
-    
+
     return rows
 
 def get_all_columns(rows):
@@ -87,69 +155,16 @@ def get_all_columns(rows):
                 all_cols[col] = True
     return list(all_cols.keys())
 
-def infer_column_type(col_name):
-    """
-    Inferir tipo de columna por nombre basado en convenciones de Access.
-    
-    Orden de prioridad:
-    1. Fechas (FEC, FECHA, DATE, ALT con COB)
-    2. Montos/importes específicos (IMP, MONTO, PRECIO, ABO/COB específicos)
-    3. IDs, códigos y números enteros (NUM, COD, ID, POS, PRO, ZON, ULT, CANT)
-    4. Texto por defecto
-    """
-    col_upper = col_name.upper()
-    
-    # 1. Fechas: FEC, FECHA, DATE, y casos específicos como ALTCOB (fecha de alta)
-    if ('FEC' in col_upper or 'FECHA' in col_upper or 'DATE' in col_upper or
-        col_upper in ['ALTCOB', 'ALTSOCIO', 'BAJAFECHA', 'PERLIQUIDANRO', 'F1CSOCIO', 'FBUSCAHR']):
-        return 'DATETIME NULL'
-    
-    # 2. Campos DECIMAL (montos, importes, precios, comisiones)
-    # Específicos para evitar falsos positivos:
-    elif (col_upper.startswith('IMP') or col_upper.startswith('MONTO') or 
-          col_upper.startswith('PRECIO') or col_upper.startswith('TOTAL') or
-          col_upper.endswith('IMP') or col_upper.endswith('MONTO') or
-          col_upper.endswith('PRECIO') or 'IMPORTE' in col_upper or 
-          'COMISION' in col_upper or
-          col_upper in ['ABOLIQUIDA', 'COMCOB', 'IMPSOCIO', 'SUBFACTURA']):
-        return 'DECIMAL(15,4) NULL'
-    
-    # 3. Campos INT (códigos, números de ID, posiciones, provincias, zonas, etc)
-    # PERO: NUMSOCIO, NUMPROMOTOR, NUMFACTURA, CUPLIQUIDA son Text en Access
-    elif (((col_upper.startswith('NUM') or col_upper.startswith('COD') or 
-            col_upper.startswith('ID') or col_upper.startswith('CANT') or
-            col_upper.startswith('POS') or col_upper.startswith('PRO') or
-            col_upper.startswith('ZON') or col_upper.startswith('ULT') or
-            col_upper.endswith('COB') or col_upper.endswith('SOCIO') or
-            col_upper.endswith('ZONA') or col_upper.endswith('LIQUIDA')) and
-           # Excepciones que son TEXT en Access:
-           col_upper not in ['NUMSOCIO', 'NUMPROMOTOR', 'NUMFACTURA', 'CUPLIQUIDA', 'SOCLIQUIDA',
-                           'OBSCOB', 'OBISOCIO', 'NOMCOB', 'DOMCOB', 'LOCCOB', 'TELCOB', 'CELCOB',
-                           'IVACOB', 'CUICOB', 'NOMSOCIO', 'FANSOCIO', 'DOMSOCIO', 'LOCSOCIO',
-                           'PROSOCIO', 'TELSOCIO', 'IVASOCIO', 'CUISOCIO', 'COMSOCIO', 'DESZONA',
-                           'ESTLIQUIDA', 'PERLIQUIDA', 'OBSLIQUIDA', 'PAGLIQUIDA', 'COMLIQUIDA',
-                           'DCOSOCIO', 'HCOSOCIO']) or
-          # Campos específicos que sabemos que son INT:
-          col_upper in ['BAJA', 'POSCOB', 'PROCOB', 'ULTCOB', 'ZONCOB', 'COBSOCIO',
-                       'PLASOCIO', 'ZONSOCIO', 'POSSOCIO', 'SUBSOCIO', 'ZONLIQUIDA', 'COBLIQUIDA']):
-        return 'INT NULL'
-    
-    # 4. Por defecto: VARCHAR
-    else:
-        return 'VARCHAR(255) NULL'
-
 def convert_date_value(value):
     """Convertir fechas de formato Access a formato MySQL"""
     if not value or value == '':
         return None
-    
+
     try:
         # Access exporta fechas como: "01/27/22 00:00:00"
-        # Intentar varios formatos
-        for fmt in ['%m/%d/%y %H:%M:%S', '%m/%d/%Y %H:%M:%S', '%Y-%m-%d %H:%M:%S']:
+        for fmt in ['%m/%d/%y %H:%M:%S', '%m/%d/%Y %H:%M:%S', '%Y-%m-%d %H:%M:%S', '%m/%d/%y', '%m/%d/%Y']:
             try:
                 dt = datetime.strptime(value, fmt)
-                # Convertir a formato MySQL: YYYY-MM-DD HH:MM:SS
                 return dt.strftime('%Y-%m-%d %H:%M:%S')
             except ValueError:
                 continue
@@ -166,14 +181,27 @@ def calculate_row_hash(row, columns):
     content = '|'.join(values)
     return hashlib.sha256(content.encode()).hexdigest()
 
+def is_date_column(col_type):
+    """Verificar si el tipo es fecha/datetime"""
+    return col_type.upper() in ['DATE', 'DATETIME']
+
 def sync_table(table_name, conn, cursor):
-    """Sincronizar una tabla completa"""
+    """Sincronizar una tabla completa usando esquema real de Access"""
     print(f"\n{'='*80}")
     print(f"TABLA: {table_name}")
     print('='*80)
-    
-    # 1. Leer desde Access
-    print(f"1. Leyendo {table_name} desde Access...")
+
+    # 1. Obtener esquema real de Access
+    print(f"1. Obteniendo esquema de Access...")
+    schema = get_access_schema(table_name)
+    if not schema:
+        print(f"   ⚠️  No se pudo obtener esquema, usando inferencia...")
+        schema = None
+    else:
+        print(f"   ✅ Esquema obtenido: {len(schema)} columnas")
+
+    # 2. Leer datos desde Access
+    print(f"2. Leyendo datos desde Access...")
     try:
         rows = read_access_table(table_name)
         if not rows:
@@ -183,25 +211,28 @@ def sync_table(table_name, conn, cursor):
     except Exception as e:
         print(f"   ❌ Error leyendo: {e}")
         return
-    
-    # 2. Analizar columnas
-    print(f"2. Analizando esquema...")
+
+    # 3. Determinar columnas
     all_cols = get_all_columns(rows)
-    print(f"   ✅ {len(all_cols)} columnas encontradas")
-    
-    # 3. Crear tabla
-    print(f"3. Creando/recreando tabla...")
+    print(f"   ✅ {len(all_cols)} columnas en datos")
+
+    # 4. Crear tabla
+    print(f"3. Creando/recreando tabla en MySQL...")
     try:
         cursor.execute(f"DROP TABLE IF EXISTS `{table_name}`")
-        
+
         col_defs = ["`id` INT AUTO_INCREMENT PRIMARY KEY"]
         for col in all_cols:
-            col_defs.append(f"`{col}` {infer_column_type(col)}")
-        
+            if schema and col in schema:
+                col_type = schema[col]
+            else:
+                col_type = 'VARCHAR(255)'  # Default si no está en esquema
+            col_defs.append(f"`{col}` {col_type} NULL")
+
         col_defs.append("`row_hash` VARCHAR(64) NULL")
         col_defs.append("`created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
         col_defs.append("`updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP")
-        
+
         create_sql = f"""
         CREATE TABLE `{table_name}` (
             {', '.join(col_defs)}
@@ -212,43 +243,44 @@ def sync_table(table_name, conn, cursor):
     except Exception as e:
         print(f"   ❌ Error creando tabla: {e}")
         return
-    
-    # 4. Insertar datos
+
+    # 5. Insertar datos
     print(f"4. Insertando {len(rows):,} registros...")
     cursor.execute("SET FOREIGN_KEY_CHECKS=0")
     cursor.execute("SET UNIQUE_CHECKS=0")
-    
+
     batch_size = 1000
     inserted = 0
-    
-    # Agregar row_hash a las columnas
-    placeholders = ', '.join(['%s'] * (len(all_cols) + 1))  # +1 para row_hash
+
+    placeholders = ', '.join(['%s'] * (len(all_cols) + 1))
     col_names = ', '.join([f'`{col}`' for col in all_cols]) + ', `row_hash`'
     insert_sql = f"INSERT INTO `{table_name}` ({col_names}) VALUES ({placeholders})"
-    
+
+    # Determinar columnas de fecha basándonos en el esquema
+    date_columns = set()
+    if schema:
+        for col, col_type in schema.items():
+            if is_date_column(col_type):
+                date_columns.add(col)
+
     for i in range(0, len(rows), batch_size):
         batch = rows[i:i+batch_size]
-        
-        # Mostrar progreso cada 10,000 registros
+
         if i > 0 and i % 10000 == 0:
             print(f"   ... {inserted:,} / {len(rows):,}")
-        
+
         values = []
         for row in batch:
-            # Calcular hash
             row_hash = calculate_row_hash(row, all_cols)
-            # Convertir fechas y agregar valores
             row_values = []
             for col in all_cols:
                 val = row.get(col) if row.get(col) else None
-                # Convertir fechas si el nombre de columna contiene FEC, FECHA, DATE o es campo DateTime específico
-                col_upper = col.upper()
-                if val and ('FEC' in col_upper or 'FECHA' in col_upper or 'DATE' in col_upper or 
-                           col_upper in ['PERLIQUIDANRO', 'F1CSOCIO', 'FBUSCAHR', 'ALTCOB', 'ALTSOCIO', 'BAJAFECHA']):
+                # Convertir fechas si la columna es de tipo fecha
+                if val and col in date_columns:
                     val = convert_date_value(val)
                 row_values.append(val)
             values.append(tuple(row_values) + (row_hash,))
-        
+
         try:
             cursor.executemany(insert_sql, values)
             inserted += len(batch)
@@ -261,29 +293,29 @@ def sync_table(table_name, conn, cursor):
                     row_values = []
                     for col in all_cols:
                         val = row.get(col) if row.get(col) else None
-                        col_upper = col.upper()
-                        if val and ('FEC' in col_upper or 'FECHA' in col_upper or 'DATE' in col_upper or
-                                   col_upper in ['PERLIQUIDANRO', 'F1CSOCIO', 'FBUSCAHR', 'ALTCOB', 'ALTSOCIO', 'BAJAFECHA']):
+                        if val and col in date_columns:
                             val = convert_date_value(val)
                         row_values.append(val)
                     cursor.execute(insert_sql, tuple(row_values) + (row_hash,))
                     inserted += 1
                 except Exception as row_err:
-                    if inserted == 0:  # Solo mostrar el primer error
+                    if inserted == 0:
                         print(f"   ⚠️ Error en registro: {row_err}")
-    
+                        print(f"      Columnas: {all_cols}")
+                        print(f"      Valores: {row_values[:5]}...")
+
     cursor.execute("SET FOREIGN_KEY_CHECKS=1")
     cursor.execute("SET UNIQUE_CHECKS=1")
-    
-    # 5. Verificar
+
+    # 6. Verificar
     cursor.execute(f"SELECT COUNT(*) FROM `{table_name}`")
     final_count = cursor.fetchone()[0]
-    
+
     print(f"   ✅ COMPLETADO: {final_count:,} registros en MySQL")
 
 # MAIN
 print("="*80)
-print("SINCRONIZACIÓN COMPLETA DE TODAS LAS TABLAS")
+print("SINCRONIZACIÓN COMPLETA - USANDO ESQUEMA REAL DE ACCESS")
 print("="*80)
 
 conn = get_mysql_connection()
