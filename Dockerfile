@@ -1,9 +1,9 @@
-# Imagen base Python
-FROM python:3.11-slim
+# Imagen base Python (bookworm tiene mdb-tools disponible)
+FROM python:3.11-bookworm
 
 # Instalar mdb-tools (necesario para leer archivos Access .mdb)
 RUN apt-get update && apt-get install -y \
-    mdb-tools \
+    mdbtools \
     && rm -rf /var/lib/apt/lists/*
 
 # Directorio de trabajo
