@@ -12,18 +12,18 @@ RUN apt-get update && apt-get install -y \
 # Directorio de trabajo
 WORKDIR /app
 
-# Clonar el repo con LFS
-ARG REPO_URL=https://github.com/nahuelalejandrogomez/presencia-etl.git
-RUN git clone --depth 1 ${REPO_URL} /tmp/repo \
-    && cd /tmp/repo \
-    && git lfs pull \
-    && cp -r /tmp/repo/* /app/ \
-    && rm -rf /tmp/repo
+# Copiar todo el código
+COPY . .
+
+# Descargar archivo LFS desde GitHub (repo público)
+RUN cd /app && git init && \
+    git remote add origin https://github.com/nahuelalejandrogomez/presencia-etl.git && \
+    git lfs pull --include="data/Datos1.mdb" || echo "LFS pull skipped"
 
 # Instalar dependencias Python
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Exponer puerto (Railway usa la variable PORT)
+# Exponer puerto
 EXPOSE 8000
 
 # Comando para ejecutar el servidor
