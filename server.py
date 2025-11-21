@@ -53,6 +53,25 @@ def sync_incremental():
 def clean_tables():
     return run_script("clean_all_tables.py")
 
+@app.route("/debug/file")
+def debug_file():
+    import os
+    mdb_path = "/app/data/Datos1.mdb"
+    result = {
+        "exists": os.path.exists(mdb_path),
+        "path": mdb_path
+    }
+    if os.path.exists(mdb_path):
+        result["size_bytes"] = os.path.getsize(mdb_path)
+        result["size_mb"] = round(os.path.getsize(mdb_path) / 1024 / 1024, 2)
+        with open(mdb_path, 'rb') as f:
+            header = f.read(50)
+            result["header_hex"] = header.hex()[:100]
+            result["is_lfs_pointer"] = header.startswith(b'version https://git-lfs')
+    if os.path.exists("/app/data"):
+        result["files_in_data"] = os.listdir("/app/data")
+    return jsonify(result)
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     from waitress import serve
