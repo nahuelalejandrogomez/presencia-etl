@@ -1,0 +1,20 @@
+# Entorno virtual
+venv_project/
+venv/
+__pycache__/
+*.pyc
+
+# Archivos de entorno (las variables se configuran en Railway)
+.env
+
+# Git
+.git/
+.gitignore
+
+# Documentación y contexto
+context/
+*.md
+
+# Archivos temporales
+*.log
+*.tmp

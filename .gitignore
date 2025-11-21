@@ -1,0 +1,23 @@
+# Entorno virtual
+venv_project/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Variables de entorno (contienen credenciales)
+.env
+
+# Logs
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# macOS
+.DS_Store
+
+# NO ignorar data/ - necesitamos el archivo Access en Railway
+# Si el archivo es muy grande, considera usar Git LFS
