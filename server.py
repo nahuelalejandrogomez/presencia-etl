@@ -53,6 +53,51 @@ def sync_incremental():
 def clean_tables():
     return run_script("clean_all_tables.py")
 
+@app.route("/run/create_mensajes_table")
+def create_mensajes_table():
+    """Crear tabla MensajesEnviados para n8n"""
+    import mysql.connector
+    try:
+        conn = mysql.connector.connect(
+            host=os.getenv('COBRANZA_DB_HOST'),
+            user=os.getenv('COBRANZA_DB_USER'),
+            password=os.getenv('COBRANZA_DB_PASSWORD'),
+            database=os.getenv('COBRANZA_DB_NAME'),
+            port=int(os.getenv('COBRANZA_DB_PORT', 3306))
+        )
+        cursor = conn.cursor()
+
+        sql = '''
+CREATE TABLE IF NOT EXISTS MensajesEnviados (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  NUMSOCIO VARCHAR(13) NOT NULL,
+  telefono VARCHAR(30),
+  mensaje TEXT NOT NULL,
+  fecha_envio DATETIME DEFAULT CURRENT_TIMESTAMP,
+  estado_envio VARCHAR(20) DEFAULT 'enviado',
+  canal VARCHAR(20) DEFAULT 'whatsapp',
+  workflow_id VARCHAR(50) DEFAULT 'cobranzas_n8n',
+  hash_mensaje VARCHAR(64),
+  respuesta_api TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_numsocio (NUMSOCIO),
+  INDEX idx_fecha_envio (fecha_envio),
+  INDEX idx_hash (hash_mensaje)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+'''
+        cursor.execute(sql)
+        conn.commit()
+
+        cursor.execute('DESCRIBE MensajesEnviados')
+        columns = [{'field': row[0], 'type': row[1]} for row in cursor.fetchall()]
+
+        cursor.close()
+        conn.close()
+
+        return jsonify({"status": "ok", "message": "Tabla MensajesEnviados creada", "columns": columns})
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 @app.route("/debug/file")
 def debug_file():
     import os
