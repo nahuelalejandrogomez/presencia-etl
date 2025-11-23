@@ -98,6 +98,38 @@ CREATE TABLE IF NOT EXISTS MensajesEnviados (
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
+@app.route("/run/add_errormessage_column")
+def add_errormessage_column():
+    """Agregar columna errormessage a tabla MensajesEnviados"""
+    import mysql.connector
+    try:
+        conn = mysql.connector.connect(
+            host=os.getenv('COBRANZA_DB_HOST'),
+            user=os.getenv('COBRANZA_DB_USER'),
+            password=os.getenv('COBRANZA_DB_PASSWORD'),
+            database=os.getenv('COBRANZA_DB_NAME'),
+            port=int(os.getenv('COBRANZA_DB_PORT', 3306))
+        )
+        cursor = conn.cursor()
+
+        # Agregar columna errormessage si no existe
+        sql = '''
+ALTER TABLE MensajesEnviados
+ADD COLUMN IF NOT EXISTS errormessage TEXT NULL AFTER respuesta_api
+'''
+        cursor.execute(sql)
+        conn.commit()
+
+        cursor.execute('DESCRIBE MensajesEnviados')
+        columns = [{'field': row[0], 'type': row[1]} for row in cursor.fetchall()]
+
+        cursor.close()
+        conn.close()
+
+        return jsonify({"status": "ok", "message": "Columna errormessage agregada", "columns": columns})
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 @app.route("/debug/file")
 def debug_file():
     import os
