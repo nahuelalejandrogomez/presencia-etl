@@ -130,6 +130,52 @@ ADD COLUMN IF NOT EXISTS errormessage TEXT NULL AFTER respuesta_api
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
+@app.route("/run/create_ia_usage_table")
+def create_ia_usage_table():
+    """Crear tabla IAUsageLogs para tracking de uso de IA"""
+    import mysql.connector
+    try:
+        conn = mysql.connector.connect(
+            host=os.getenv('COBRANZA_DB_HOST'),
+            user=os.getenv('COBRANZA_DB_USER'),
+            password=os.getenv('COBRANZA_DB_PASSWORD'),
+            database=os.getenv('COBRANZA_DB_NAME'),
+            port=int(os.getenv('COBRANZA_DB_PORT', 3306))
+        )
+        cursor = conn.cursor()
+
+        sql = '''
+CREATE TABLE IF NOT EXISTS IAUsageLogs (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  workflow_id VARCHAR(50),
+  socio_id VARCHAR(50) NULL,
+  telefono VARCHAR(50) NULL,
+  input_tokens INT DEFAULT 0,
+  output_tokens INT DEFAULT 0,
+  total_tokens INT DEFAULT 0,
+  latency_ms INT DEFAULT 0,
+  model_used VARCHAR(50),
+  status VARCHAR(20) DEFAULT 'success',
+  errormessage TEXT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_workflow (workflow_id),
+  INDEX idx_created (created_at),
+  INDEX idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+'''
+        cursor.execute(sql)
+        conn.commit()
+
+        cursor.execute('DESCRIBE IAUsageLogs')
+        columns = [{'field': row[0], 'type': row[1]} for row in cursor.fetchall()]
+
+        cursor.close()
+        conn.close()
+
+        return jsonify({"status": "ok", "message": "Tabla IAUsageLogs creada", "columns": columns})
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 @app.route("/debug/file")
 def debug_file():
     import os
