@@ -176,6 +176,53 @@ CREATE TABLE IF NOT EXISTS IAUsageLogs (
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
+@app.route("/run/create_conversaciones_table")
+def create_conversaciones_table():
+    """Crear tabla Conversaciones para almacenar historial de chats completos"""
+    import mysql.connector
+    try:
+        conn = mysql.connector.connect(
+            host=os.getenv('COBRANZA_DB_HOST'),
+            user=os.getenv('COBRANZA_DB_USER'),
+            password=os.getenv('COBRANZA_DB_PASSWORD'),
+            database=os.getenv('COBRANZA_DB_NAME'),
+            port=int(os.getenv('COBRANZA_DB_PORT', 3306))
+        )
+        cursor = conn.cursor()
+
+        sql = '''
+CREATE TABLE IF NOT EXISTS Conversaciones (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  telefono VARCHAR(30) NOT NULL,
+  socio_id VARCHAR(50) NULL,
+  rol ENUM('usuario', 'bot', 'agente') NOT NULL,
+  mensaje TEXT NOT NULL,
+  canal ENUM('whatsapp', 'telegram') NOT NULL,
+  fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
+  workflow_id VARCHAR(100) NULL,
+  conversacion_id VARCHAR(50) NULL,
+  raw_json LONGTEXT NULL,
+
+  INDEX idx_telefono (telefono),
+  INDEX idx_socio (socio_id),
+  INDEX idx_fecha (fecha),
+  INDEX idx_canal (canal),
+  INDEX idx_conversacion (conversacion_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+'''
+        cursor.execute(sql)
+        conn.commit()
+
+        cursor.execute('DESCRIBE Conversaciones')
+        columns = [{'field': row[0], 'type': row[1]} for row in cursor.fetchall()]
+
+        cursor.close()
+        conn.close()
+
+        return jsonify({"status": "ok", "message": "Tabla Conversaciones creada", "columns": columns})
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 @app.route("/debug/file")
 def debug_file():
     import os
