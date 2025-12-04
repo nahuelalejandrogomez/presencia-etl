@@ -18,22 +18,29 @@ ACCESS_DB = os.getenv('COBRANZA_ACCESS_PATH', '/Users/nahuel/Documents/Desarroll
 
 # Lista de tablas principales a sincronizar
 TABLES = [
-    'Cobradores',
-    'Socios',  # ⚠️ FILTRADO: Solo BAJA<>1 (activos)
-    'Liquidaciones',
-    'TblObras',
-    'TblPlanes',
-    'TblFPagos',
-    'TblIva',
-    'TblZonas',
-    'TblPromotores',
-    'TbComentariosSocios'
+    'Cobradores',      # FILTRADO: NUMCOB=30
+    'Socios',          # FILTRADO: COBSOCIO=30
+    'Liquidaciones',   # FILTRADO: COBLIQUIDA=30 AND BAJA<>1
+    'TblObras',        # SIN FILTRO (todas)
+    'TblPlanes',       # SIN FILTRO (todas)
+    'TblFPagos',       # SIN FILTRO (todas)
+    'TblIva',          # SIN FILTRO (todas)
+    'TblZonas',        # SIN FILTRO (todas)
+    'TblPromotores',   # SIN FILTRO (todas)
+    'TbComentariosSocios'  # FILTRADO: Indirecto via socios del cobrador 30
 ]
 
-# 🔥 FILTROS: Solo se excluyen socios dados de baja
+# 🔥 FILTROS: Solo cobrador 30 y relacionados
 TABLE_FILTERS = {
+    'Cobradores': {
+        'NUMCOB': '30'          # Solo cobrador 30
+    },
     'Socios': {
-        'BAJA': '1'      # Excluir socios dados de baja (BAJA=1)
+        'COBSOCIO': '30'        # Solo socios del cobrador 30
+    },
+    'Liquidaciones': {
+        'COBLIQUIDA': '30',     # Solo liquidaciones del cobrador 30
+        'BAJA': '1'             # Excluir liquidaciones dadas de baja (BAJA=1)
     }
 }
 
@@ -118,7 +125,7 @@ def convert_access_type_to_mysql(access_type):
     else:
         return 'VARCHAR(255)'  # Default
 
-def read_access_table(table_name):
+def read_access_table(table_name, socios_numsocio_list=None):
     """Leer tabla desde Access aplicando filtros si existen"""
     result = subprocess.run(
         ['mdb-export', ACCESS_DB, table_name],
@@ -133,16 +140,18 @@ def read_access_table(table_name):
     if table_name in TABLE_FILTERS:
         filters = TABLE_FILTERS[table_name]
 
-        if table_name == 'Socios' and isinstance(filters, dict):
-            # Filtro 1: BAJA<>1 (excluir dados de baja)
-            if 'BAJA' in filters:
-                exclude_value = filters['BAJA']
-                rows = [row for row in rows if row.get('BAJA') != exclude_value]
+        # Filtro genérico: Para cada clave en filters
+        for field, value in filters.items():
+            if field == 'BAJA':
+                # BAJA: excluir si BAJA=value (normalmente '1')
+                rows = [row for row in rows if row.get(field) != value]
+            else:
+                # Otros campos: incluir solo si campo=value
+                rows = [row for row in rows if row.get(field) == value]
 
-            # Filtro 2: COMSOCIO='CU' (solo socios con cupones)
-            if 'COMSOCIO' in filters:
-                required_value = filters['COMSOCIO']
-                rows = [row for row in rows if row.get('COMSOCIO') == required_value]
+    # Filtro especial para TbComentariosSocios: solo comentarios de socios filtrados
+    if table_name == 'TbComentariosSocios' and socios_numsocio_list:
+        rows = [row for row in rows if row.get('NUMSOCIO') in socios_numsocio_list]
 
     return rows
 
@@ -185,7 +194,7 @@ def is_date_column(col_type):
     """Verificar si el tipo es fecha/datetime"""
     return col_type.upper() in ['DATE', 'DATETIME']
 
-def sync_table(table_name, conn, cursor):
+def sync_table(table_name, conn, cursor, socios_numsocio_list=None):
     """Sincronizar una tabla completa usando esquema real de Access"""
     print(f"\n{'='*80}")
     print(f"TABLA: {table_name}")
@@ -203,7 +212,7 @@ def sync_table(table_name, conn, cursor):
     # 2. Leer datos desde Access
     print(f"2. Leyendo datos desde Access...")
     try:
-        rows = read_access_table(table_name)
+        rows = read_access_table(table_name, socios_numsocio_list)
         if not rows:
             print(f"   ⚠️  Tabla vacía, saltando...")
             return
@@ -219,6 +228,7 @@ def sync_table(table_name, conn, cursor):
     # 4. Crear tabla
     print(f"3. Creando/recreando tabla en MySQL...")
     try:
+        cursor.execute("SET FOREIGN_KEY_CHECKS=0")
         cursor.execute(f"DROP TABLE IF EXISTS `{table_name}`")
 
         col_defs = ["`id` INT AUTO_INCREMENT PRIMARY KEY"]
@@ -239,8 +249,10 @@ def sync_table(table_name, conn, cursor):
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """
         cursor.execute(create_sql)
+        cursor.execute("SET FOREIGN_KEY_CHECKS=1")
         print(f"   ✅ Tabla creada")
     except Exception as e:
+        cursor.execute("SET FOREIGN_KEY_CHECKS=1")
         print(f"   ❌ Error creando tabla: {e}")
         return
 
@@ -315,16 +327,24 @@ def sync_table(table_name, conn, cursor):
 
 # MAIN
 print("="*80)
-print("SINCRONIZACIÓN COMPLETA - USANDO ESQUEMA REAL DE ACCESS")
+print("SINCRONIZACIÓN COMPLETA - COBRADOR 30")
 print("="*80)
 
 conn = get_mysql_connection()
 cursor = conn.cursor()
 
 results = {}
+socios_numsocio_list = None
+
 for table in TABLES:
     try:
-        sync_table(table, conn, cursor)
+        # Capturar NUMSOCIO de Socios para filtrar TbComentariosSocios
+        if table == 'Socios':
+            socios_rows = read_access_table('Socios')
+            socios_numsocio_list = set([row.get('NUMSOCIO') for row in socios_rows if row.get('NUMSOCIO')])
+            print(f"\n📋 Capturados {len(socios_numsocio_list)} NUMSOCIO de Socios para filtrar comentarios\n")
+
+        sync_table(table, conn, cursor, socios_numsocio_list)
         cursor.execute(f"SELECT COUNT(*) FROM `{table}`")
         count = cursor.fetchone()[0]
         results[table] = count

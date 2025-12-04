@@ -17,24 +17,29 @@ ACCESS_DB = os.getenv('COBRANZA_ACCESS_PATH', '/Users/nahuel/Documents/Desarroll
 
 # Tablas principales
 TABLES = [
-    'Cobradores',
-    'Socios',  # ⚠️ FILTRADO: Solo BAJA<>1 (activos)
-    'Liquidaciones',
-    'TblObras',
-    'TblPlanes',
-    'TblFPagos',
-    'TblIva',
-    'TblZonas',
-    'TblPromotores',
-    'TbComentariosSocios'
+    'Cobradores',      # FILTRADO: NUMCOB=30
+    'Socios',          # FILTRADO: COBSOCIO=30
+    'Liquidaciones',   # FILTRADO: COBLIQUIDA=30 AND BAJA<>1
+    'TblObras',        # SIN FILTRO (todas)
+    'TblPlanes',       # SIN FILTRO (todas)
+    'TblFPagos',       # SIN FILTRO (todas)
+    'TblIva',          # SIN FILTRO (todas)
+    'TblZonas',        # SIN FILTRO (todas)
+    'TblPromotores',   # SIN FILTRO (todas)
+    'TbComentariosSocios'  # FILTRADO: Indirecto via socios del cobrador 30
 ]
 
-# 🔥 FILTROS CRÍTICOS: Solo se sincronizan registros activos con cupones
-# Se aplican en read_access_table() después de mdb-export
+# 🔥 FILTROS: Solo cobrador 30 y relacionados
 TABLE_FILTERS = {
+    'Cobradores': {
+        'NUMCOB': '30'          # Solo cobrador 30
+    },
     'Socios': {
-        'BAJA': '1',      # Excluir socios dados de baja (BAJA=1)
-        'COMSOCIO': 'CU'  # Solo socios con cupones (COMSOCIO='CU')
+        'COBSOCIO': '30'        # Solo socios del cobrador 30
+    },
+    'Liquidaciones': {
+        'COBLIQUIDA': '30',     # Solo liquidaciones del cobrador 30
+        'BAJA': '1'             # Excluir liquidaciones dadas de baja (BAJA=1)
     }
 }
 
@@ -53,7 +58,7 @@ def get_mysql_connection():
     }
     return mysql.connector.connect(**config)
 
-def read_access_table(table_name):
+def read_access_table(table_name, socios_numsocio_list=None):
     """Leer tabla desde Access aplicando filtros si existen"""
     result = subprocess.run(
         ['mdb-export', ACCESS_DB, table_name],
@@ -63,22 +68,24 @@ def read_access_table(table_name):
     )
     reader = csv.DictReader(StringIO(result.stdout))
     rows = list(reader)
-    
+
     # Aplicar filtros en Python si existen para esta tabla
     if table_name in TABLE_FILTERS:
         filters = TABLE_FILTERS[table_name]
-        
-        if table_name == 'Socios' and isinstance(filters, dict):
-            # Filtro 1: BAJA<>1 (excluir dados de baja)
-            if 'BAJA' in filters:
-                exclude_value = filters['BAJA']
-                rows = [row for row in rows if row.get('BAJA') != exclude_value]
-            
-            # Filtro 2: COMSOCIO='CU' (solo socios con cupones)
-            if 'COMSOCIO' in filters:
-                required_value = filters['COMSOCIO']
-                rows = [row for row in rows if row.get('COMSOCIO') == required_value]
-    
+
+        # Filtro genérico: Para cada clave en filters
+        for field, value in filters.items():
+            if field == 'BAJA':
+                # BAJA: excluir si BAJA=value (normalmente '1')
+                rows = [row for row in rows if row.get(field) != value]
+            else:
+                # Otros campos: incluir solo si campo=value
+                rows = [row for row in rows if row.get(field) == value]
+
+    # Filtro especial para TbComentariosSocios: solo comentarios de socios filtrados
+    if table_name == 'TbComentariosSocios' and socios_numsocio_list:
+        rows = [row for row in rows if row.get('NUMSOCIO') in socios_numsocio_list]
+
     return rows
 
 def get_all_columns(rows):
@@ -335,16 +342,16 @@ def sync_table_full_refresh(table_name, conn, cursor, rows):
     except Exception as e:
         print(f"   ❌ Error insertando: {e}")
 
-def sync_table_incremental(table_name, conn, cursor):
+def sync_table_incremental(table_name, conn, cursor, socios_numsocio_list=None):
     """Sincronización INCREMENTAL: INSERT nuevos, UPDATE cambios"""
     print(f"\n{'='*80}")
     print(f"TABLA: {table_name}")
     print('='*80)
-    
+
     # 1. Leer Access
     print(f"1. Leyendo desde Access...")
     try:
-        rows = read_access_table(table_name)
+        rows = read_access_table(table_name, socios_numsocio_list)
         if not rows:
             print(f"   ⚠️  Tabla vacía")
             return
@@ -501,25 +508,33 @@ def sync_table_incremental(table_name, conn, cursor):
 
 # MAIN
 print("="*80)
-print("SINCRONIZACIÓN INCREMENTAL")
+print("SINCRONIZACIÓN INCREMENTAL - COBRADOR 30")
 print("="*80)
 
 conn = get_mysql_connection()
 cursor = conn.cursor()
 
 results = {}
+socios_numsocio_list = None
+
 for table in TABLES:
     try:
+        # Capturar NUMSOCIO de Socios para filtrar TbComentariosSocios
+        if table == 'Socios':
+            socios_rows = read_access_table('Socios')
+            socios_numsocio_list = set([row.get('NUMSOCIO') for row in socios_rows if row.get('NUMSOCIO')])
+            print(f"\n📋 Capturados {len(socios_numsocio_list)} NUMSOCIO de Socios para filtrar comentarios\n")
+
         # Verificar si esta tabla requiere FULL REFRESH
         if table in FULL_REFRESH_TABLES:
             # Leer datos de Access
-            rows = read_access_table(table)
+            rows = read_access_table(table, socios_numsocio_list)
             # Hacer DROP/CREATE/INSERT
             sync_table_full_refresh(table, conn, cursor, rows)
         else:
             # Sincronización incremental normal
-            sync_table_incremental(table, conn, cursor)
-        
+            sync_table_incremental(table, conn, cursor, socios_numsocio_list)
+
         cursor.execute(f"SELECT COUNT(*) FROM `{table}`")
         count = cursor.fetchone()[0]
         results[table] = count
